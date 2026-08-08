@@ -168,13 +168,13 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP GOTTY WEB TERMINAL WITH STABLE ARGS
+          # PHASE 2: SETUP GOTTY WEB TERMINAL DIRECTLY WITH POWERSHELL
           Write-Host "[Phase 2] Setting up Gotty Web Terminal..."
           go install github.com/sorenisanerd/gotty@latest
           $env:Path += ";$env:USERPROFILE\go\bin"
 
-          # Gotty flags: --permit-write (-w) to allow typing, --random-url=false to keep stable connection endpoint
-          Start-Process -FilePath "gotty" -ArgumentList "--port", "7681", "--permit-write", "--random-url=false", "powershell.exe", "-NoLogo" -NoNewWindow
+          # Direct execution of powershell with --permit-write (-w) and --random-url=false
+          Start-Process -FilePath "gotty" -ArgumentList "--port", "7681", "--permit-write", "--random-url=false", "powershell.exe" -NoNewWindow
           Start-Sleep -Seconds 3
 
           # Download and Start Cloudflared Tunnel for Gotty
