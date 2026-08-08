@@ -177,122 +177,74 @@ jobs:
           npm init -y | Out-Null
           npm install ws --quiet
 
-          # Write HTML File Cleanly
-          $htmlContent = @'
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Windows Admin Terminal</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-  <style>
-    body, html { margin: 0; padding: 0; height: 100%; background: #0c0c0c; color: #fff; font-family: monospace; overflow: hidden; }
-    #terminal { width: 100vw; height: 100vh; padding: 10px; box-sizing: border-box; }
-  </style>
-</head>
-<body>
-  <div id="terminal"></div>
-  <script>
-    const term = new Terminal({
-      cursorBlink: true,
-      theme: { background: "#0c0c0c", foreground: "#00ff00" },
-      fontSize: 14,
-      fontFamily: 'Consolas, "Courier New", monospace'
-    });
-    const fitAddon = new FitAddon.FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(document.getElementById("terminal"));
-    fitAddon.fit();
-    window.addEventListener("resize", () => fitAddon.fit());
+          # Generate index.html cleanly
+          $htmlFile = "$termDir\index.html"
+          Remove-Item $htmlFile -ErrorAction SilentlyContinue
+          Add-Content -Path $htmlFile -Value '<!DOCTYPE html>'
+          Add-Content -Path $htmlFile -Value '<html>'
+          Add-Content -Path $htmlFile -Value '<head>'
+          Add-Content -Path $htmlFile -Value '  <meta charset="utf-8">'
+          Add-Content -Path $htmlFile -Value '  <title>Windows Admin Terminal</title>'
+          Add-Content -Path $htmlFile -Value '  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />'
+          Add-Content -Path $htmlFile -Value '  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>'
+          Add-Content -Path $htmlFile -Value '  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>'
+          Add-Content -Path $htmlFile -Value '  <style>body,html{margin:0;padding:0;height:100%;background:#0c0c0c;color:#fff;font-family:monospace;overflow:hidden;}#terminal{width:100vw;height:100vh;padding:10px;box-sizing:border-box;}</style>'
+          Add-Content -Path $htmlFile -Value '</head>'
+          Add-Content -Path $htmlFile -Value '<body>'
+          Add-Content -Path $htmlFile -Value '  <div id="terminal"></div>'
+          Add-Content -Path $htmlFile -Value '  <script>'
+          Add-Content -Path $htmlFile -Value '    const term = new Terminal({cursorBlink:true,theme:{background:"#0c0c0c",foreground:"#00ff00"},fontSize:14});'
+          Add-Content -Path $htmlFile -Value '    const fitAddon = new FitAddon.FitAddon();'
+          Add-Content -Path $htmlFile -Value '    term.loadAddon(fitAddon);'
+          Add-Content -Path $htmlFile -Value '    term.open(document.getElementById("terminal"));'
+          Add-Content -Path $htmlFile -Value '    fitAddon.fit();'
+          Add-Content -Path $htmlFile -Value '    window.addEventListener("resize",()=>fitAddon.fit());'
+          Add-Content -Path $htmlFile -Value '    term.writeln("Connecting to Windows Admin Terminal...");'
+          Add-Content -Path $htmlFile -Value '    const protocol = location.protocol === "https:" ? "wss:" : "ws:";'
+          Add-Content -Path $htmlFile -Value '    let socket;'
+          Add-Content -Path $htmlFile -Value '    function connect(){'
+          Add-Content -Path $htmlFile -Value '      socket = new WebSocket(protocol + "//" + location.host + "/ws");'
+          Add-Content -Path $htmlFile -Value '      socket.onopen = () => term.writeln("\r\n*** Connected to Windows PowerShell (Admin) ***\r\n");'
+          Add-Content -Path $htmlFile -Value '      socket.onmessage = (e) => term.write(e.data);'
+          Add-Content -Path $htmlFile -Value '      socket.onclose = () => { term.writeln("\r\n[Disconnected. Reconnecting...]"); setTimeout(connect, 3000); };'
+          Add-Content -Path $htmlFile -Value '      socket.onerror = () => socket.close();'
+          Add-Content -Path $htmlFile -Value '    }'
+          Add-Content -Path $htmlFile -Value '    term.onData(data => { if (socket && socket.readyState === WebSocket.OPEN) socket.send(data); });'
+          Add-Content -Path $htmlFile -Value '    connect();'
+          Add-Content -Path $htmlFile -Value '  </script>'
+          Add-Content -Path $htmlFile -Value '</body>'
+          Add-Content -Path $htmlFile -Value '</html>'
 
-    term.writeln("Connecting to Windows Admin Terminal...");
-
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    let socket;
-
-    function connect() {
-      socket = new WebSocket(protocol + "//" + location.host + "/ws");
-      socket.onopen = () => {
-        term.writeln("\r\n*** Connected to Windows PowerShell (Admin) ***\r\n");
-      };
-      socket.onmessage = (e) => {
-        term.write(e.data);
-      };
-      socket.onclose = () => {
-        term.writeln("\r\n[Disconnected. Reconnecting...]");
-        setTimeout(connect, 3000);
-      };
-      socket.onerror = () => socket.close();
-    }
-
-    term.onData(data => {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(data);
-      }
-    });
-
-    connect();
-  </script>
-</body>
-</html>
-'@
-          [System.IO.File]::WriteAllText("$termDir\index.html", $htmlContent, [System.Text.Encoding]::UTF8)
-
-          # Write Node.js Server File Cleanly
-          $serverContent = @'
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
-const WebSocket = require('ws');
-
-const server = http.createServer((req, res) => {
-  if (req.url === '/' || req.url === '/index.html') {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(fs.readFileSync(path.join(__dirname, 'index.html')));
-  } else {
-    res.writeHead(404);
-    res.end('Not Found');
-  }
-});
-
-const wss = new WebSocket.Server({ server, path: '/ws' });
-
-wss.on('connection', (ws) => {
-  const ps = spawn('powershell.exe', ['-NoLogo', '-NoExit', '-Command', '-'], { env: process.env, cwd: 'C:\\' });
-
-  ps.stdout.on('data', (d) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(d.toString().replace(/\n/g, '\r\n'));
-    }
-  });
-
-  ps.stderr.on('data', (d) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(d.toString().replace(/\n/g, '\r\n'));
-    }
-  });
-
-  ws.on('message', (m) => {
-    ps.stdin.write(m.toString());
-  });
-
-  ws.on('close', () => {
-    try { ps.kill(); } catch (e) {}
-  });
-
-  ps.on('close', () => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.close();
-    }
-  });
-});
-
-server.listen(7681, '0.0.0.0', () => console.log('Terminal running on port 7681'));
-'@
-          [System.IO.File]::WriteAllText("$termDir\server.js", $serverContent, [System.Text.Encoding]::UTF8)
+          # Generate server.js cleanly
+          $srvFile = "$termDir\server.js"
+          Remove-Item $srvFile -ErrorAction SilentlyContinue
+          Add-Content -Path $srvFile -Value 'const http = require("http");'
+          Add-Content -Path $srvFile -Value 'const fs = require("fs");'
+          Add-Content -Path $srvFile -Value 'const path = require("path");'
+          Add-Content -Path $srvFile -Value 'const { spawn } = require("child_process");'
+          Add-Content -Path $srvFile -Value 'const WebSocket = require("ws");'
+          Add-Content -Path $srvFile -Value ''
+          Add-Content -Path $srvFile -Value 'const server = http.createServer((req, res) => {'
+          Add-Content -Path $srvFile -Value '  if (req.url === "/" || req.url === "/index.html") {'
+          Add-Content -Path $srvFile -Value '    res.writeHead(200, { "Content-Type": "text/html" });'
+          Add-Content -Path $srvFile -Value '    res.end(fs.readFileSync(path.join(__dirname, "index.html")));'
+          Add-Content -Path $srvFile -Value '  } else {'
+          Add-Content -Path $srvFile -Value '    res.writeHead(404);'
+          Add-Content -Path $srvFile -Value '    res.end("Not Found");'
+          Add-Content -Path $srvFile -Value '  }'
+          Add-Content -Path $srvFile -Value '});'
+          Add-Content -Path $srvFile -Value ''
+          Add-Content -Path $srvFile -Value 'const wss = new WebSocket.Server({ server, path: "/ws" });'
+          Add-Content -Path $srvFile -Value 'wss.on("connection", (ws) => {'
+          Add-Content -Path $srvFile -Value '  const ps = spawn("powershell.exe", ["-NoLogo", "-NoExit", "-Command", "-"], { env: process.env, cwd: "C:\\" });'
+          Add-Content -Path $srvFile -Value '  ps.stdout.on("data", (d) => ws.readyState === WebSocket.OPEN && ws.send(d.toString().replace(/\n/g, "\r\n")));'
+          Add-Content -Path $srvFile -Value '  ps.stderr.on("data", (d) => ws.readyState === WebSocket.OPEN && ws.send(d.toString().replace(/\n/g, "\r\n")));'
+          Add-Content -Path $srvFile -Value '  ws.on("message", (m) => ps.stdin.write(m.toString()));'
+          Add-Content -Path $srvFile -Value '  ws.on("close", () => { try { ps.kill(); } catch (e) {} });'
+          Add-Content -Path $srvFile -Value '  ps.on("close", () => ws.readyState === WebSocket.OPEN && ws.close());'
+          Add-Content -Path $srvFile -Value '});'
+          Add-Content -Path $srvFile -Value ''
+          Add-Content -Path $srvFile -Value 'server.listen(7681, "0.0.0.0", () => console.log("Terminal running on port 7681"));'
 
           # Start Node Terminal Process
           Start-Process -FilePath "node" -ArgumentList "$termDir\server.js" -WorkingDirectory $termDir -NoNewWindow
