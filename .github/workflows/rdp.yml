@@ -95,7 +95,7 @@ jobs:
           }
           Write-Host "TCP connectivity successful!"
 
-      - name: Deploy Web Terminal & Hermes Agent (Phased Telegram Updates)
+      - name: Deploy Gotty Web Terminal & Hermes Agent (Phased Telegram Updates)
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -121,7 +121,7 @@ jobs:
 
           # PHASE 1: IMMEDIATE RDP DETAILS TO TELEGRAM (~5 sec)
           Write-Host "[Phase 1] Sending initial RDP details to Telegram..."
-          $termDisplay = "⏳ <i>Starting Web Terminal...</i>"
+          $termDisplay = "⏳ <i>Starting Gotty Terminal...</i>"
           $hermesDisplay = "⏳ <i>Waiting for Terminal setup...</i>"
           
           $msgPhase1 = "⚡ <b>Active RDP Details (Auto-Trigger Mode)</b> ⚡`n`n" +
@@ -168,21 +168,15 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP WEBTERM (abhishekkrthakur/webterm)
-          Write-Host "[Phase 2] Setting up abhishekkrthakur/webterm..."
-          $termDir = "$env:TEMP\webterm"
-          if (Test-Path $termDir) { Remove-Item -Recurse -Force $termDir }
-          git clone https://github.com/abhishekkrthakur/webterm.git $termDir
-          Set-Location $termDir
+          # PHASE 2: SETUP GOTTY WEB TERMINAL
+          Write-Host "[Phase 2] Setting up Gotty Web Terminal..."
+          go install github.com/sorenisanerd/gotty@latest
+          $env:Path += ";$env:USERPROFILE\go\bin"
 
-          # Install webterm using editable mode as per official docs
-          pip install -e . --quiet
-          
-          # Start webterm server on port 7681
-          Start-Process -FilePath "webterm" -ArgumentList "--host", "127.0.0.1", "--port", "7681" -WorkingDirectory $termDir -NoNewWindow
-          Start-Sleep -Seconds 5
+          Start-Process -FilePath "gotty" -ArgumentList "-p", "7681", "-w", "powershell.exe" -NoNewWindow
+          Start-Sleep -Seconds 3
 
-          # Download and Start Cloudflared Tunnel for Web Terminal
+          # Download and Start Cloudflared Tunnel for Gotty
           $cfPath = "$env:TEMP\cloudflared.exe"
           $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
           if (-not (Test-Path $cfPath)) {
@@ -210,7 +204,7 @@ jobs:
 
           if ($webTermUrl) {
               $safeTermUrl = [System.Net.WebUtility]::HtmlEncode($webTermUrl)
-              $termDisplay = "🖥️ <a href=`"$safeTermUrl`"><b>Open Web Terminal (Admin)</b></a>"
+              $termDisplay = "🖥️ <a href=`"$safeTermUrl`"><b>Open Gotty Web Terminal</b></a>"
           } else {
               $termDisplay = "⚠️ <i>Terminal Tunnel Error</i>"
           }
