@@ -168,12 +168,13 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP GOTTY WEB TERMINAL
+          # PHASE 2: SETUP GOTTY WEB TERMINAL WITH CMD/POWERSHELL FIX
           Write-Host "[Phase 2] Setting up Gotty Web Terminal..."
           go install github.com/sorenisanerd/gotty@latest
           $env:Path += ";$env:USERPROFILE\go\bin"
 
-          Start-Process -FilePath "gotty" -ArgumentList "-p", "7681", "-w", "powershell.exe" -NoNewWindow
+          # Using cmd.exe /c powershell.exe to prevent backend startup failure on Windows
+          Start-Process -FilePath "gotty" -ArgumentList "-p", "7681", "-w", "cmd.exe", "/c", "powershell.exe" -NoNewWindow
           Start-Sleep -Seconds 3
 
           # Download and Start Cloudflared Tunnel for Gotty
