@@ -96,7 +96,7 @@ jobs:
           }
           Write-Host "TCP connectivity successful!"
 
-      # STEP: Phased Deployment (RDP -> Web Terminal -> Hermes Gateway -> Live Timer)
+      # STEP: Phased Deployment (RDP -> Native Web Terminal -> Hermes Gateway -> Live Timer)
       - name: Deploy Web Terminal & Hermes Agent (Phased Telegram Updates)
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -176,17 +176,140 @@ jobs:
           }
 
           # ===================================================================
-          # PHASE 2: SETUP WEB TERMINAL & UPDATE TELEGRAM INSTANTLY (~15 sec)
+          # PHASE 2: SETUP NATIVE NODE.JS WEB TERMINAL (~10 sec)
           # ===================================================================
-          Write-Host "[Phase 2] Setting up Web Terminal (ttyd)..."
-          $ttydPath = "$env:TEMP\ttyd.exe"
-          $ttydUrl = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.win32.exe"
-          Invoke-WebRequest -Uri $ttydUrl -OutFile $ttydPath
+          Write-Host "[Phase 2] Setting up Native Node.js Web Terminal..."
+          $termDir = "$env:TEMP\webterm"
+          New-Item -ItemType Directory -Path $termDir -Force | Out-Null
+          Set-Location $termDir
 
-          # Start ttyd on Port 7681 bound to 127.0.0.1 with PowerShell
-          Start-Process -FilePath $ttydPath -ArgumentList "-p 7681 cmd.exe /k powershell.exe" -NoNewWindow
+          # Initialize npm and install ws library
+          npm init -y | Out-Null
+          npm install ws --quiet
 
-          # Setup Cloudflare Tunnel for Web Terminal using 127.0.0.1 explicitly
+          # Write Node.js Web Terminal Server Script
+          $nodeScript = @'
+const http = require('http');
+const { spawn } = require('child_process');
+const WebSocket = require('ws');
+
+const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Windows Admin Web Terminal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <style>
+    body, html { margin: 0; padding: 0; height: 100%; background: #0c0c0c; color: #fff; font-family: monospace; overflow: hidden; }
+    #terminal { width: 100vw; height: 100vh; padding: 5px; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <script>
+    const term = new Terminal({
+      cursorBlink: true,
+      theme: { background: '#0c0c0c', foreground: '#00ff00' },
+      fontSize: 14,
+      fontFamily: 'Consolas, "Courier New", monospace'
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById('terminal'));
+    fitAddon.fit();
+    window.addEventListener('resize', () => fitAddon.fit());
+
+    term.writeln('Connecting to Windows Admin Terminal...');
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let socket;
+
+    function connect() {
+      socket = new WebSocket(protocol + '//' + location.host + '/ws');
+      socket.onopen = () => {
+        term.writeln('\\r\\n*** Connected to Windows PowerShell (Admin Privileges) ***\\r\\n');
+      };
+      socket.onmessage = (e) => {
+        term.write(e.data);
+      };
+      socket.onclose = () => {
+        term.writeln('\\r\\n[Disconnected. Reconnecting in 3s...]');
+        setTimeout(connect, 3000);
+      };
+      socket.onerror = () => {
+        socket.close();
+      };
+    }
+
+    term.onData(data => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(data);
+      }
+    });
+
+    connect();
+  </script>
+</body>
+</html>`;
+
+const server = http.createServer((req, res) => {
+  if (req.url === '/' || req.url === '/index.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html);
+  } else {
+    res.writeHead(404);
+    res.end('Not Found');
+  }
+});
+
+const wss = new WebSocket.Server({ server, path: '/ws' });
+
+wss.on('connection', (ws) => {
+  const ps = spawn('powershell.exe', ['-NoLogo', '-NoExit', '-Command', '-'], {
+    env: process.env,
+    cwd: 'C:\\'
+  });
+
+  ps.stdout.on('data', (data) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data.toString().replace(/\n/g, '\r\n'));
+    }
+  });
+
+  ps.stderr.on('data', (data) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data.toString().replace(/\n/g, '\r\n'));
+    }
+  });
+
+  ws.on('message', (msg) => {
+    ps.stdin.write(msg.toString());
+  });
+
+  ws.on('close', () => {
+    try { ps.kill(); } catch (e) {}
+  });
+
+  ps.on('close', () => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+  });
+});
+
+server.listen(7681, '0.0.0.0', () => {
+  console.log('Node.js Web Terminal listening on port 7681');
+});
+'@
+
+          Set-Content -Path "$termDir\server.js" -Value $nodeScript -Encoding UTF8
+
+          # Launch Node.js Web Terminal Server
+          Start-Process -FilePath "node" -ArgumentList "$termDir\server.js" -WorkingDirectory $termDir -NoNewWindow
+
+          # Launch Cloudflare Tunnel
           $cfPath = "$env:TEMP\cloudflared.exe"
           $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
           Invoke-WebRequest -Uri $cfUrl -OutFile $cfPath
@@ -194,7 +317,7 @@ jobs:
           $termLog = "$env:TEMP\cf_terminal.log"
           Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://127.0.0.1:7681" -RedirectStandardError $termLog -NoNewWindow
 
-          # Fetch Terminal Public Link
+          # Extract Web Terminal Public HTTPS Link
           $webTermUrl = ""
           $retries = 0
           while (-not $webTermUrl -and $retries -lt 15) {
