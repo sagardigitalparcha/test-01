@@ -177,7 +177,7 @@ jobs:
           npm init -y | Out-Null
           npm install ws --quiet
 
-          # Write HTML file cleanly using literal single quotes
+          # Write HTML file with local typing echo for smooth response
           $htmlLines = @(
               '<!DOCTYPE html>',
               '<html>',
@@ -203,12 +203,17 @@ jobs:
               '    let socket;',
               '    function connect(){',
               '      socket = new WebSocket(protocol + "//" + location.host + "/ws");',
-              '      socket.onopen = () => term.writeln("\r\n*** Connected to Windows PowerShell (Admin) ***\r\n");',
+              '      socket.onopen = () => term.writeln("\r\n*** Connected to Windows PowerShell (Admin) ***\r\nPS C:\\> ");',
               '      socket.onmessage = (e) => term.write(e.data);',
               '      socket.onclose = () => { term.writeln("\r\n[Disconnected. Reconnecting...]"); setTimeout(connect, 3000); };',
               '      socket.onerror = () => socket.close();',
               '    }',
-              '    term.onData(data => { if (socket && socket.readyState === WebSocket.OPEN) socket.send(data); });',
+              '    term.onData(data => {',
+              '      if (socket && socket.readyState === WebSocket.OPEN) {',
+              '        term.write(data);',
+              '        socket.send(data);',
+              '      }',
+              '    });',
               '    connect();',
               '  </script>',
               '</body>',
@@ -216,7 +221,7 @@ jobs:
           )
           $htmlLines | Set-Content -Path "$termDir\index.html" -Encoding UTF8
 
-          # Write Node.js server script cleanly using literal single quotes
+          # Write Node.js server script
           $serverLines = @(
               'const http = require(''http'');',
               'const fs = require(''fs'');',
@@ -236,7 +241,7 @@ jobs:
               '',
               'const wss = new WebSocket.Server({ server, path: ''/ws'' });',
               'wss.on(''connection'', (ws) => {',
-              '  const ps = spawn(''powershell.exe'', [''-NoLogo'', ''-NoExit'', ''-Command'', ''-''], { env: process.env, cwd: ''C:\\\\'' });',
+              '  const ps = spawn(''powershell.exe'', [''-NoLogo'', ''-NoExit'', ''-Command'', ''-''], { env: process.env, cwd: ''C:\\\\' });',
               '  ps.stdout.on(''data'', (d) => ws.readyState === WebSocket.OPEN && ws.send(d.toString().replace(/\n/g, ''\r\n'')));',
               '  ps.stderr.on(''data'', (d) => ws.readyState === WebSocket.OPEN && ws.send(d.toString().replace(/\n/g, ''\r\n'')));',
               '  ws.on(''message'', (m) => ps.stdin.write(m.toString()));',
@@ -299,29 +304,18 @@ jobs:
               Write-Host "Telegram updated with Web Terminal link!"
           } catch {}
 
-          # PHASE 3: INSTALL HERMES SERVICE & UPDATE TELEGRAM (~2-3 mins)
-          Write-Host "[Phase 3] Installing Hermes Agent & Gateway Service..."
-          $nssmPath = "$env:TEMP\nssm.exe"
-          if (-not (Test-Path $nssmPath)) {
-              Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile "$env:TEMP\nssm.zip"
-              Expand-Archive -Path "$env:TEMP\nssm.zip" -DestinationPath "$env:TEMP\nssm_extracted" -Force
-              Copy-Item "$env:TEMP\nssm_extracted\nssm-2.24\win64\nssm.exe" $nssmPath -Force
-          }
-
+          # PHASE 3: INSTALL HERMES BACKGROUND PROCESS & UPDATE TELEGRAM (~2-3 mins)
+          Write-Host "[Phase 3] Installing Hermes Agent..."
           $hermesDir = "$env:USERPROFILE\hermes-agent"
           git clone https://github.com/NousResearch/Hermes-Agent.git $hermesDir
           Set-Location $hermesDir
 
           if (Test-Path "$hermesDir\package.json") {
               npm install --quiet
-              & $nssmPath install "HermesGatewayService" "npm.cmd" "start"
-              & $nssmPath set "HermesGatewayService" AppDirectory "$hermesDir"
-              Start-Service "HermesGatewayService"
+              Start-Process -FilePath "npm.cmd" -ArgumentList "start" -WorkingDirectory $hermesDir -NoNewWindow
           } elseif (Test-Path "$hermesDir\requirements.txt") {
               pip install -r requirements.txt
-              & $nssmPath install "HermesGatewayService" "python.exe" "app.py"
-              & $nssmPath set "HermesGatewayService" AppDirectory "$hermesDir"
-              Start-Service "HermesGatewayService"
+              Start-Process -FilePath "python.exe" -ArgumentList "app.py" -WorkingDirectory $hermesDir -NoNewWindow
           }
 
           $hermesPort = 3000
