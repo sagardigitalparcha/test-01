@@ -28,6 +28,10 @@ jobs:
 
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          
+          # Allow Web Terminal & Hermes Ports in Firewall
+          netsh advfirewall firewall add rule name="WebTerminal" dir=in action=allow protocol=TCP localport=7681
+          netsh advfirewall firewall add rule name="HermesPort" dir=in action=allow protocol=TCP localport=3000
 
           Restart-Service -Name TermService -Force
 
@@ -179,21 +183,21 @@ jobs:
           $ttydUrl = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.win32.exe"
           Invoke-WebRequest -Uri $ttydUrl -OutFile $ttydPath
 
-          # Start ttyd on Port 7681 with Elevated PowerShell (Admin Privileges)
-          Start-Process -FilePath $ttydPath -ArgumentList "-p 7681 powershell.exe" -NoNewWindow
+          # Start ttyd on Port 7681 bound to 127.0.0.1 with PowerShell
+          Start-Process -FilePath $ttydPath -ArgumentList "-p 7681 cmd.exe /k powershell.exe" -NoNewWindow
 
-          # Setup Cloudflare Tunnel for Web Terminal
+          # Setup Cloudflare Tunnel for Web Terminal using 127.0.0.1 explicitly
           $cfPath = "$env:TEMP\cloudflared.exe"
           $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
           Invoke-WebRequest -Uri $cfUrl -OutFile $cfPath
 
           $termLog = "$env:TEMP\cf_terminal.log"
-          Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://localhost:7681" -RedirectStandardError $termLog -NoNewWindow
+          Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://127.0.0.1:7681" -RedirectStandardError $termLog -NoNewWindow
 
           # Fetch Terminal Public Link
           $webTermUrl = ""
           $retries = 0
-          while (-not $webTermUrl -and $retries -lt 12) {
+          while (-not $webTermUrl -and $retries -lt 15) {
               Start-Sleep -Seconds 2
               if (Test-Path $termLog) {
                   $logContent = Get-Content $termLog -Raw
@@ -240,7 +244,6 @@ jobs:
           Write-Host "[Phase 3] Installing Hermes Agent & Gateway Service..."
           $nssmPath = "$env:TEMP\nssm.exe"
           if (-not (Test-Path $nssmPath)) {
-              # Fixed NSSM Download using Official Link
               Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile "$env:TEMP\nssm.zip"
               Expand-Archive -Path "$env:TEMP\nssm.zip" -DestinationPath "$env:TEMP\nssm_extracted" -Force
               Copy-Item "$env:TEMP\nssm_extracted\nssm-2.24\win64\nssm.exe" $nssmPath -Force
@@ -266,7 +269,7 @@ jobs:
 
           $hermesPort = 3000
           $hermesLog = "$env:TEMP\cf_hermes.log"
-          Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://localhost:$hermesPort" -RedirectStandardError $hermesLog -NoNewWindow
+          Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://127.0.0.1:$hermesPort" -RedirectStandardError $hermesLog -NoNewWindow
 
           # Extract Hermes Public HTTPS Link
           $hermesUrl = ""
