@@ -168,13 +168,13 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP GOTTY WEB TERMINAL DIRECTLY WITH POWERSHELL
+          # PHASE 2: SETUP GOTTY WITH CMD.EXE BACKEND FOR WINDOWS STABILITY
           Write-Host "[Phase 2] Setting up Gotty Web Terminal..."
           go install github.com/sorenisanerd/gotty@latest
           $env:Path += ";$env:USERPROFILE\go\bin"
 
-          # Direct execution of powershell with --permit-write (-w) and --random-url=false
-          Start-Process -FilePath "gotty" -ArgumentList "--port", "7681", "--permit-write", "--random-url=false", "powershell.exe" -NoNewWindow
+          # Using cmd.exe as backend to prevent Windows PTY pipe closure issues
+          Start-Process -FilePath "gotty" -ArgumentList "--port", "7681", "--permit-write", "--random-url=false", "cmd.exe" -NoNewWindow
           Start-Sleep -Seconds 3
 
           # Download and Start Cloudflared Tunnel for Gotty
