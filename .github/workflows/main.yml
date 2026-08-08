@@ -1,0 +1,232 @@
+# STEP: Phased Deployment (RDP -> Web Terminal -> Hermes Service -> Timer)
+      - name: Deploy Web Terminal & Hermes Agent (Phased Telegram Updates)
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TAILSCALE_IP: ${{ env.TAILSCALE_IP }}
+          RDP_PASSWORD: ${{ env.RDP_PASSWORD }}
+        run: |
+          Add-Type -AssemblyName System.Web
+          
+          $ip = $env:TAILSCALE_IP
+          $pass = $env:RDP_PASSWORD
+          $safeIp = [System.Net.WebUtility]::HtmlEncode($ip)
+          $safePass = [System.Net.WebUtility]::HtmlEncode($pass)
+          
+          # IST Time Zone setup
+          $tzIST = [TimeZoneInfo]::FindSystemTimeZoneById('India Standard Time')
+          $istStart = [TimeZoneInfo]::ConvertTime((Get-Date), $tzIST)
+          $startTimeStr = $istStart.ToString("yyyy-MM-dd hh:mm:ss tt") + " IST"
+
+          # Telegram API Helper Function
+          function Invoke-TelegramApi ($method, $payload) {
+              $uri = "https://api.telegram.org/bot$($env:BOT_TOKEN)/$method"
+              $json = $payload | ConvertTo-Json -Depth 5 -Compress
+              return Invoke-RestMethod -Uri $uri -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json))
+          }
+
+          # ===================================================================
+          # PHASE 1: IMMEDIATE RDP DETAILS TO TELEGRAM (within seconds)
+          # ===================================================================
+          Write-Host "[Phase 1] Sending initial RDP details to Telegram..."
+          $termDisplay = "⏳ <i>Starting Web Terminal...</i>"
+          $hermesDisplay = "⏳ <i>Waiting for Terminal setup...</i>"
+          
+          $msgPhase1 = "⚡ <b>Active RDP Details (Auto-Trigger Mode)</b> ⚡`n`n" +
+                        "📅 <b>Started At (IST):</b> $startTimeStr`n" +
+                        "🌐 <b>Tailscale IP:</b> <code>$safeIp</code>`n" +
+                        "👤 <b>Username:</b> <code>RDP</code>`n" +
+                        "🔑 <b>Password:</b> <code>$safePass</code>`n`n" +
+                        "🖥️ <b>Web Terminal:</b> $termDisplay`n" +
+                        "🤖 <b>Hermes Dashboard:</b> $hermesDisplay`n`n" +
+                        "⏳ <b>Time Remaining:</b> 05 Hours 35 Mins 00 Secs`n" +
+                        "🟢 <b>Status:</b> Active (Initializing Services...)"
+
+          # Pin or Send Message
+          $msgId = $null
+          try {
+              $chatInfo = Invoke-TelegramApi -method "getChat" -payload @{ chat_id = $env:CHAT_ID }
+              if ($chatInfo.ok -and $chatInfo.result.pinned_message) {
+                  $msgId = $chatInfo.result.pinned_message.message_id
+              }
+          } catch {}
+
+          if ($msgId) {
+              try {
+                  $null = Invoke-TelegramApi -method "editMessageText" -payload @{
+                      chat_id    = $env:CHAT_ID
+                      message_id = $msgId
+                      text       = $msgPhase1
+                      parse_mode = "HTML"
+                  }
+              } catch { $msgId = $null }
+          }
+
+          if (-not $msgId) {
+              $sendRes = Invoke-TelegramApi -method "sendMessage" -payload @{
+                  chat_id    = $env:CHAT_ID
+                  text       = $msgPhase1
+                  parse_mode = "HTML"
+              }
+              $msgId = $sendRes.result.message_id
+              try {
+                  $null = Invoke-TelegramApi -method "pinChatMessage" -payload @{
+                      chat_id    = $env:CHAT_ID
+                      message_id = $msgId
+                  }
+              } catch {}
+          }
+
+          # ===================================================================
+          # PHASE 2: SETUP WEB TERMINAL & UPDATE TELEGRAM INSTANTLY (~15 sec)
+          # ===================================================================
+          Write-Host "[Phase 2] Setting up Web Terminal (ttyd)..."
+          $ttydPath = "$env:TEMP\ttyd.exe"
+          $ttydUrl = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.win32.exe"
+          Invoke-WebRequest -Uri $ttydUrl -OutFile $ttydPath
+
+          # Start ttyd on Port 7681 with Elevated PowerShell (Admin Privileges)
+          Start-Process -FilePath $ttydPath -ArgumentList "-p 7681 powershell.exe" -NoNewWindow
+
+          # Setup Cloudflare Tunnel for Web Terminal
+          $cfPath = "$env:TEMP\cloudflared.exe"
+          $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+          Invoke-WebRequest -Uri $cfUrl -OutFile $cfPath
+
+          $termLog = "$env:TEMP\cf_terminal.log"
+          Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://localhost:7681" -RedirectStandardError $termLog -NoNewWindow
+
+          # Fetch Terminal Public Link
+          $webTermUrl = ""
+          $retries = 0
+          while (-not $webTermUrl -and $retries -lt 12) {
+              Start-Sleep -Seconds 2
+              if (Test-Path $termLog) {
+                  $logContent = Get-Content $termLog -Raw
+                  if ($logContent -match "https://[a-zA-Z0-9-]+\.trycloudflare\.com") {
+                      $webTermUrl = $matches[0]
+                  }
+              }
+              $retries++
+          }
+
+          if ($webTermUrl) {
+              $safeTermUrl = [System.Net.WebUtility]::HtmlEncode($webTermUrl)
+              $termDisplay = "🖥️ <a href=`"$safeTermUrl`"><b>Open Web Terminal (Admin)</b></a>"
+          } else {
+              $termDisplay = "⚠️ <i>Terminal Error (Retry RDP)</i>"
+          }
+
+          $hermesDisplay = "⏳ <i>Installing Hermes Gateway Service...</i>"
+
+          # Update Telegram Message with Web Terminal Link
+          $msgPhase2 = "⚡ <b>Active RDP Details (Auto-Trigger Mode)</b> ⚡`n`n" +
+                        "📅 <b>Started At (IST):</b> $startTimeStr`n" +
+                        "🌐 <b>Tailscale IP:</b> <code>$safeIp</code>`n" +
+                        "👤 <b>Username:</b> <code>RDP</code>`n" +
+                        "🔑 <b>Password:</b> <code>$safePass</code>`n`n" +
+                        "🖥️ <b>Web Terminal:</b> $termDisplay`n" +
+                        "🤖 <b>Hermes Dashboard:</b> $hermesDisplay`n`n" +
+                        "⏳ <b>Time Remaining:</b> 05 Hours 34 Mins 30 Secs`n" +
+                        "🟢 <b>Status:</b> Terminal Ready ✅ (Installing Hermes...)"
+
+          try {
+              $null = Invoke-TelegramApi -method "editMessageText" -payload @{
+                  chat_id    = $env:CHAT_ID
+                  message_id = $msgId
+                  text       = $msgPhase2
+                  parse_mode = "HTML"
+              }
+              Write-Host "Telegram updated with Web Terminal link!"
+          } catch {}
+
+          # ===================================================================
+          # PHASE 3: INSTALL HERMES SERVICE & UPDATE TELEGRAM (~2-3 mins)
+          # ===================================================================
+          Write-Host "[Phase 3] Installing Hermes Agent & Gateway Service..."
+          $nssmPath = "$env:TEMP\nssm.exe"
+          if (-not (Test-Path $nssmPath)) {
+              Invoke-WebRequest -Uri "https://github.com/nssm-win/nssm/releases/download/2.24-101-g897c7ad/nssm-2.24-101-g897c7ad.zip" -OutFile "$env:TEMP\nssm.zip"
+              Expand-Archive -Path "$env:TEMP\nssm.zip" -DestinationPath "$env:TEMP\nssm_extracted" -Force
+              Copy-Item "$env:TEMP\nssm_extracted\nssm-2.24-101-g897c7ad\win64\nssm.exe" $nssmPath -Force
+          }
+
+          # Clone Hermes Repository
+          $hermesDir = "$env:USERPROFILE\hermes-agent"
+          git clone https://github.com/NousResearch/Hermes-Agent.git $hermesDir
+          Set-Location $hermesDir
+
+          # Install dependencies & register Windows System Service
+          if (Test-Path "$hermesDir\package.json") {
+              npm install --quiet
+              & $nssmPath install "HermesGatewayService" "npm.cmd" "start"
+              & $nssmPath set "HermesGatewayService" AppDirectory "$hermesDir"
+              Start-Service "HermesGatewayService"
+          } elseif (Test-Path "$hermesDir\requirements.txt") {
+              pip install -r requirements.txt
+              & $nssmPath install "HermesGatewayService" "python.exe" "app.py"
+              & $nssmPath set "HermesGatewayService" AppDirectory "$hermesDir"
+              Start-Service "HermesGatewayService"
+          }
+
+          $hermesPort = 3000
+          $hermesLog = "$env:TEMP\cf_hermes.log"
+          Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://localhost:$hermesPort" -RedirectStandardError $hermesLog -NoNewWindow
+
+          # Extract Hermes Public HTTPS Link
+          $hermesUrl = ""
+          $retries = 0
+          while (-not $hermesUrl -and $retries -lt 15) {
+              Start-Sleep -Seconds 4
+              if (Test-Path $hermesLog) {
+                  $logContent = Get-Content $hermesLog -Raw
+                  if ($logContent -match "https://[a-zA-Z0-9-]+\.trycloudflare\.com") {
+                      $hermesUrl = $matches[0]
+                  }
+              }
+              $retries++
+          }
+
+          if ($hermesUrl) {
+              $safeHermes = [System.Net.WebUtility]::HtmlEncode($hermesUrl)
+              $hermesDisplay = "🔗 <a href=`"$safeHermes`"><b>Open Hermes Dashboard</b></a>"
+          } else {
+              $hermesDisplay = "⚠️ <i>Running locally on port $hermesPort</i>"
+          }
+
+          # ===================================================================
+          # PHASE 4: COUNTDOWN LOOP WITH ALL ACTIVE LINKS
+          # ===================================================================
+          $totalSeconds = 19800 # 5 hours 30 mins
+
+          for ($s = $totalSeconds; $s -gt 0; $s -= 60) {
+              Start-Sleep -Seconds 60
+              $remSec = $s - 60
+              
+              $remHours = [math]::Floor($remSec / 3600)
+              $remMin = [math]::Floor(($remSec % 3600) / 60)
+              $timeFormatted = "{0:D2} Hours {1:D2} Mins {2:D2} Secs" -f [int]$remHours, [int]$remMin, [int]($remSec % 60)
+              
+              $istCurrent = [TimeZoneInfo]::ConvertTime((Get-Date), $tzIST).ToString("hh:mm:ss tt") + " IST"
+              $statusStr = if ($remSec -gt 0) { "🟢 <b>Status:</b> Active (All Systems Running)" } else { "🔴 <b>Status:</b> Session Ending..." }
+
+              $loopMsg = "⚡ <b>Active RDP Details (Auto-Trigger Mode)</b> ⚡`n`n" +
+                         "📅 <b>Started At (IST):</b> $startTimeStr`n" +
+                         "🕒 <b>Last Update:</b> $istCurrent`n" +
+                         "🌐 <b>Tailscale IP:</b> <code>$safeIp</code>`n" +
+                         "👤 <b>Username:</b> <code>RDP</code>`n" +
+                         "🔑 <b>Password:</b> <code>$safePass</code>`n`n" +
+                         "🖥️ <b>Web Terminal:</b> $termDisplay`n" +
+                         "🤖 <b>Hermes Dashboard:</b> $hermesDisplay`n`n" +
+                         "⏳ <b>Time Remaining:</b> $timeFormatted`n" +
+                         $statusStr
+
+              try {
+                  $null = Invoke-TelegramApi -method "editMessageText" -payload @{
+                      chat_id    = $env:CHAT_ID
+                      message_id = $msgId
+                      text       = $loopMsg
+                      parse_mode = "HTML"
+                  }
+              } catch {}
+          }
