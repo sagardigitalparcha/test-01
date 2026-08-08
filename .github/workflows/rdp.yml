@@ -168,92 +168,29 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP NATIVE NODE.JS WEB TERMINAL (~15 sec)
-          Write-Host "[Phase 2] Setting up Native Node.js Web Terminal..."
+          # PHASE 2: SETUP WEBTERM FROM GITHUB (abhishekkrthakur/webterm)
+          Write-Host "[Phase 2] Setting up abhishekkrthakur/webterm..."
           $termDir = "$env:TEMP\webterm"
-          New-Item -ItemType Directory -Path $termDir -Force | Out-Null
+          git clone https://github.com/abhishekkrthakur/webterm.git $termDir
           Set-Location $termDir
 
-          npm init -y | Out-Null
-          npm install ws --quiet
+          if (Test-Path "$termDir\package.json") {
+              npm install --quiet
+              Start-Process -FilePath "npm" -ArgumentList "start" -WorkingDirectory $termDir -NoNewWindow
+          } elseif (Test-Path "$termDir\requirements.txt") {
+              pip install -r requirements.txt --quiet
+              Start-Process -FilePath "python" -ArgumentList "app.py" -WorkingDirectory $termDir -NoNewWindow
+          } else {
+              Start-Process -FilePath "go" -ArgumentList "run", "." -WorkingDirectory $termDir -NoNewWindow
+          }
+          Start-Sleep -Seconds 5
 
-          # Generate index.html cleanly
-          $htmlFile = "$termDir\index.html"
-          Remove-Item $htmlFile -ErrorAction SilentlyContinue
-          Add-Content -Path $htmlFile -Value '<!DOCTYPE html>'
-          Add-Content -Path $htmlFile -Value '<html>'
-          Add-Content -Path $htmlFile -Value '<head>'
-          Add-Content -Path $htmlFile -Value '  <meta charset="utf-8">'
-          Add-Content -Path $htmlFile -Value '  <title>Windows Admin Terminal</title>'
-          Add-Content -Path $htmlFile -Value '  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />'
-          Add-Content -Path $htmlFile -Value '  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>'
-          Add-Content -Path $htmlFile -Value '  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>'
-          Add-Content -Path $htmlFile -Value '  <style>body,html{margin:0;padding:0;height:100%;background:#0c0c0c;color:#fff;font-family:monospace;overflow:hidden;}#terminal{width:100vw;height:100vh;padding:10px;box-sizing:border-box;}</style>'
-          Add-Content -Path $htmlFile -Value '</head>'
-          Add-Content -Path $htmlFile -Value '<body>'
-          Add-Content -Path $htmlFile -Value '  <div id="terminal"></div>'
-          Add-Content -Path $htmlFile -Value '  <script>'
-          Add-Content -Path $htmlFile -Value '    const term = new Terminal({cursorBlink:true,theme:{background:"#0c0c0c",foreground:"#00ff00"},fontSize:14});'
-          Add-Content -Path $htmlFile -Value '    const fitAddon = new FitAddon.FitAddon();'
-          Add-Content -Path $htmlFile -Value '    term.loadAddon(fitAddon);'
-          Add-Content -Path $htmlFile -Value '    term.open(document.getElementById("terminal"));'
-          Add-Content -Path $htmlFile -Value '    fitAddon.fit();'
-          Add-Content -Path $htmlFile -Value '    window.addEventListener("resize",()=>fitAddon.fit());'
-          Add-Content -Path $htmlFile -Value '    term.writeln("Connecting to Windows Admin Terminal...");'
-          Add-Content -Path $htmlFile -Value '    const protocol = location.protocol === "https:" ? "wss:" : "ws:";'
-          Add-Content -Path $htmlFile -Value '    let socket;'
-          Add-Content -Path $htmlFile -Value '    function connect(){'
-          Add-Content -Path $htmlFile -Value '      socket = new WebSocket(protocol + "//" + location.host + "/ws");'
-          Add-Content -Path $htmlFile -Value '      socket.onopen = () => term.writeln("\r\n*** Connected to Windows PowerShell (Admin) ***\r\n");'
-          Add-Content -Path $htmlFile -Value '      socket.onmessage = (e) => term.write(e.data);'
-          Add-Content -Path $htmlFile -Value '      socket.onclose = () => { term.writeln("\r\n[Disconnected. Reconnecting...]"); setTimeout(connect, 3000); };'
-          Add-Content -Path $htmlFile -Value '      socket.onerror = () => socket.close();'
-          Add-Content -Path $htmlFile -Value '    }'
-          Add-Content -Path $htmlFile -Value '    term.onData(data => { if (socket && socket.readyState === WebSocket.OPEN) socket.send(data); });'
-          Add-Content -Path $htmlFile -Value '    connect();'
-          Add-Content -Path $htmlFile -Value '  </script>'
-          Add-Content -Path $htmlFile -Value '</body>'
-          Add-Content -Path $htmlFile -Value '</html>'
-
-          # Generate server.js cleanly
-          $srvFile = "$termDir\server.js"
-          Remove-Item $srvFile -ErrorAction SilentlyContinue
-          Add-Content -Path $srvFile -Value 'const http = require("http");'
-          Add-Content -Path $srvFile -Value 'const fs = require("fs");'
-          Add-Content -Path $srvFile -Value 'const path = require("path");'
-          Add-Content -Path $srvFile -Value 'const { spawn } = require("child_process");'
-          Add-Content -Path $srvFile -Value 'const WebSocket = require("ws");'
-          Add-Content -Path $srvFile -Value ''
-          Add-Content -Path $srvFile -Value 'const server = http.createServer((req, res) => {'
-          Add-Content -Path $srvFile -Value '  if (req.url === "/" || req.url === "/index.html") {'
-          Add-Content -Path $srvFile -Value '    res.writeHead(200, { "Content-Type": "text/html" });'
-          Add-Content -Path $srvFile -Value '    res.end(fs.readFileSync(path.join(__dirname, "index.html")));'
-          Add-Content -Path $srvFile -Value '  } else {'
-          Add-Content -Path $srvFile -Value '    res.writeHead(404);'
-          Add-Content -Path $srvFile -Value '    res.end("Not Found");'
-          Add-Content -Path $srvFile -Value '  }'
-          Add-Content -Path $srvFile -Value '});'
-          Add-Content -Path $srvFile -Value ''
-          Add-Content -Path $srvFile -Value 'const wss = new WebSocket.Server({ server, path: "/ws" });'
-          Add-Content -Path $srvFile -Value 'wss.on("connection", (ws) => {'
-          Add-Content -Path $srvFile -Value '  const ps = spawn("powershell.exe", ["-NoLogo", "-NoExit", "-Command", "-"], { env: process.env, cwd: "C:\\" });'
-          Add-Content -Path $srvFile -Value '  ps.stdout.on("data", (d) => ws.readyState === WebSocket.OPEN && ws.send(d.toString().replace(/\n/g, "\r\n")));'
-          Add-Content -Path $srvFile -Value '  ps.stderr.on("data", (d) => ws.readyState === WebSocket.OPEN && ws.send(d.toString().replace(/\n/g, "\r\n")));'
-          Add-Content -Path $srvFile -Value '  ws.on("message", (m) => ps.stdin.write(m.toString()));'
-          Add-Content -Path $srvFile -Value '  ws.on("close", () => { try { ps.kill(); } catch (e) {} });'
-          Add-Content -Path $srvFile -Value '  ps.on("close", () => ws.readyState === WebSocket.OPEN && ws.close());'
-          Add-Content -Path $srvFile -Value '});'
-          Add-Content -Path $srvFile -Value ''
-          Add-Content -Path $srvFile -Value 'server.listen(7681, "0.0.0.0", () => console.log("Terminal running on port 7681"));'
-
-          # Start Node Terminal Process
-          Start-Process -FilePath "node" -ArgumentList "$termDir\server.js" -WorkingDirectory $termDir -NoNewWindow
-          Start-Sleep -Seconds 3
-
-          # Download and Start Cloudflared Tunnel
+          # Download and Start Cloudflared Tunnel for Web Terminal
           $cfPath = "$env:TEMP\cloudflared.exe"
           $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-          Invoke-WebRequest -Uri $cfUrl -OutFile $cfPath
+          if (-not (Test-Path $cfPath)) {
+              Invoke-WebRequest -Uri $cfUrl -OutFile $cfPath
+          }
 
           $termLog = "$env:TEMP\cf_terminal.log"
           Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://127.0.0.1:7681" -RedirectStandardError $termLog -NoNewWindow
@@ -303,23 +240,21 @@ jobs:
               Write-Host "Telegram updated with Web Terminal link!"
           } catch {}
 
-          # PHASE 3: EXACT HERMES AGENT INSTALLATION & EXECUTION
+          # PHASE 3: HERMES AGENT INSTALLATION & EXECUTION
           Write-Host "[Phase 3] Installing Hermes Agent..."
           $hermesDir = "$env:USERPROFILE\hermes-agent"
           git clone https://github.com/NousResearch/Hermes-Agent.git $hermesDir
           Set-Location $hermesDir
 
-          # 1. Python dependencies install
           if (Test-Path "$hermesDir\requirements.txt") {
               pip install -r requirements.txt --quiet
+              pip install pyyaml --quiet
           }
 
-          # 2. Browser Node dependencies install
           if (Test-Path "$hermesDir\package.json") {
               npm install --quiet
           }
 
-          # 3. Official Execution Command: python run_agent.py
           if (Test-Path "$hermesDir\run_agent.py") {
               Start-Process -FilePath "python.exe" -ArgumentList "run_agent.py" -WorkingDirectory $hermesDir -NoNewWindow
           }
@@ -363,15 +298,15 @@ jobs:
               $statusStr = if ($remSec -gt 0) { "🟢 <b>Status:</b> Active (All Systems Running)" } else { "🔴 <b>Status:</b> Session Ending..." }
 
               $loopMsg = "⚡ <b>Active RDP Details (Auto-Trigger Mode)</b> ⚡`n`n" +
-                         "📅 <b>Started At (IST):</b> $startTimeStr`n" +
-                         "🕒 <b>Last Update:</b> $istCurrent`n" +
-                         "🌐 <b>Tailscale IP:</b> <code>$safeIp</code>`n" +
-                         "👤 <b>Username:</b> <code>RDP</code>`n" +
-                         "🔑 <b>Password:</b> <code>$safePass</code>`n`n" +
-                         "🖥️ <b>Web Terminal:</b> $termDisplay`n" +
-                         "🤖 <b>Hermes Dashboard:</b> $hermesDisplay`n`n" +
-                         "⏳ <b>Time Remaining:</b> $timeFormatted`n" +
-                         $statusStr
+                          "📅 <b>Started At (IST):</b> $startTimeStr`n" +
+                          "🕒 <b>Last Update:</b> $istCurrent`n" +
+                          "🌐 <b>Tailscale IP:</b> <code>$safeIp</code>`n" +
+                          "👤 <b>Username:</b> <code>RDP</code>`n" +
+                          "🔑 <b>Password:</b> <code>$safePass</code>`n`n" +
+                          "🖥️ <b>Web Terminal:</b> $termDisplay`n" +
+                          "🤖 <b>Hermes Dashboard:</b> $hermesDisplay`n`n" +
+                          "⏳ <b>Time Remaining:</b> $timeFormatted`n" +
+                          $statusStr
 
               try {
                   $null = Invoke-TelegramApi -method "editMessageText" -payload @{
