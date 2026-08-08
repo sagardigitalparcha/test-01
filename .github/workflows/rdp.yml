@@ -95,7 +95,7 @@ jobs:
           }
           Write-Host "TCP connectivity successful!"
 
-      - name: Deploy Gotty Web Terminal & Hermes Agent (Phased Telegram Updates)
+      - name: Deploy ttyd Web Terminal & Hermes Agent (Phased Telegram Updates)
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -121,7 +121,7 @@ jobs:
 
           # PHASE 1: IMMEDIATE RDP DETAILS TO TELEGRAM (~5 sec)
           Write-Host "[Phase 1] Sending initial RDP details to Telegram..."
-          $termDisplay = "⏳ <i>Starting Gotty Terminal...</i>"
+          $termDisplay = "⏳ <i>Starting ttyd Terminal...</i>"
           $hermesDisplay = "⏳ <i>Waiting for Terminal setup...</i>"
           
           $msgPhase1 = "⚡ <b>Active RDP Details (Auto-Trigger Mode)</b> ⚡`n`n" +
@@ -168,16 +168,17 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP GOTTY WITH CMD.EXE BACKEND FOR WINDOWS STABILITY
-          Write-Host "[Phase 2] Setting up Gotty Web Terminal..."
-          go install github.com/sorenisanerd/gotty@latest
-          $env:Path += ";$env:USERPROFILE\go\bin"
+          # PHASE 2: SETUP ttyd WEB TERMINAL VIA WINGET
+          Write-Host "[Phase 2] Installing and setting up ttyd Web Terminal..."
+          winget install tsl0922.ttyd --silent --accept-package-agreements --accept-source-agreements
+          
+          # Add WindowsApps to path to detect ttyd executable
+          $env:Path += ";$env:LOCALAPPDATA\Microsoft\WindowsApps;C:\Program Files\ttyd"
 
-          # Using cmd.exe as backend to prevent Windows PTY pipe closure issues
-          Start-Process -FilePath "gotty" -ArgumentList "--port", "7681", "--permit-write", "--random-url=false", "cmd.exe" -NoNewWindow
+          Start-Process -FilePath "ttyd" -ArgumentList "-p", "7681", "-w", "powershell.exe" -NoNewWindow
           Start-Sleep -Seconds 3
 
-          # Download and Start Cloudflared Tunnel for Gotty
+          # Download and Start Cloudflared Tunnel for ttyd
           $cfPath = "$env:TEMP\cloudflared.exe"
           $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
           if (-not (Test-Path $cfPath)) {
@@ -205,7 +206,7 @@ jobs:
 
           if ($webTermUrl) {
               $safeTermUrl = [System.Net.WebUtility]::HtmlEncode($webTermUrl)
-              $termDisplay = "🖥️ <a href=`"$safeTermUrl`"><b>Open Gotty Web Terminal</b></a>"
+              $termDisplay = "🖥️ <a href=`"$safeTermUrl`"><b>Open ttyd Web Terminal</b></a>"
           } else {
               $termDisplay = "⚠️ <i>Terminal Tunnel Error</i>"
           }
