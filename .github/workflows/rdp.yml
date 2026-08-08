@@ -240,9 +240,10 @@ jobs:
           Write-Host "[Phase 3] Installing Hermes Agent & Gateway Service..."
           $nssmPath = "$env:TEMP\nssm.exe"
           if (-not (Test-Path $nssmPath)) {
-              Invoke-WebRequest -Uri "https://github.com/nssm-win/nssm/releases/download/2.24-101-g897c7ad/nssm-2.24-101-g897c7ad.zip" -OutFile "$env:TEMP\nssm.zip"
+              # Fixed NSSM Download using Official Link
+              Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile "$env:TEMP\nssm.zip"
               Expand-Archive -Path "$env:TEMP\nssm.zip" -DestinationPath "$env:TEMP\nssm_extracted" -Force
-              Copy-Item "$env:TEMP\nssm_extracted\nssm-2.24-101-g897c7ad\win64\nssm.exe" $nssmPath -Force
+              Copy-Item "$env:TEMP\nssm_extracted\nssm-2.24\win64\nssm.exe" $nssmPath -Force
           }
 
           # Clone Hermes Repository
