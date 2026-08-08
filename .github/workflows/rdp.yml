@@ -168,7 +168,7 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP ttyd WEB TERMINAL (Direct Download Fix)
+          # PHASE 2: SETUP ttyd WEB TERMINAL (Fixed with uppercase -W for writable)
           Write-Host "[Phase 2] Setting up ttyd Web Terminal..."
           $ttydPath = "$env:TEMP\ttyd.exe"
           $ttydUrl = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.win32.exe"
@@ -176,7 +176,7 @@ jobs:
               Invoke-WebRequest -Uri $ttydUrl -OutFile $ttydPath
           }
 
-          Start-Process -FilePath $ttydPath -ArgumentList "-p", "7681", "-w", "powershell.exe" -NoNewWindow
+          Start-Process -FilePath $ttydPath -ArgumentList "-p", "7681", "-W", "powershell.exe" -NoNewWindow
           Start-Sleep -Seconds 3
 
           # Download and Start Cloudflared Tunnel for ttyd
