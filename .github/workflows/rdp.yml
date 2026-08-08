@@ -168,13 +168,13 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP GOTTY WEB TERMINAL WITH CMD/POWERSHELL FIX
+          # PHASE 2: SETUP GOTTY WEB TERMINAL WITH STABLE ARGS
           Write-Host "[Phase 2] Setting up Gotty Web Terminal..."
           go install github.com/sorenisanerd/gotty@latest
           $env:Path += ";$env:USERPROFILE\go\bin"
 
-          # Using cmd.exe /c powershell.exe to prevent backend startup failure on Windows
-          Start-Process -FilePath "gotty" -ArgumentList "-p", "7681", "-w", "cmd.exe", "/c", "powershell.exe" -NoNewWindow
+          # Gotty flags: --permit-write (-w) to allow typing, --random-url=false to keep stable connection endpoint
+          Start-Process -FilePath "gotty" -ArgumentList "--port", "7681", "--permit-write", "--random-url=false", "powershell.exe", "-NoLogo" -NoNewWindow
           Start-Sleep -Seconds 3
 
           # Download and Start Cloudflared Tunnel for Gotty
