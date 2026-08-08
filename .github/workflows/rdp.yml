@@ -29,7 +29,6 @@ jobs:
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           
-          # Allow Web Terminal & Hermes Ports in Firewall
           netsh advfirewall firewall add rule name="WebTerminal" dir=in action=allow protocol=TCP localport=7681
           netsh advfirewall firewall add rule name="HermesPort" dir=in action=allow protocol=TCP localport=3000
 
@@ -96,7 +95,6 @@ jobs:
           }
           Write-Host "TCP connectivity successful!"
 
-      # STEP: Phased Deployment (RDP -> Native Web Terminal -> Hermes Gateway -> Live Timer)
       - name: Deploy Web Terminal & Hermes Agent (Phased Telegram Updates)
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -111,21 +109,17 @@ jobs:
           $safeIp = [System.Net.WebUtility]::HtmlEncode($ip)
           $safePass = [System.Net.WebUtility]::HtmlEncode($pass)
           
-          # IST Time Zone setup
           $tzIST = [TimeZoneInfo]::FindSystemTimeZoneById('India Standard Time')
           $istStart = [TimeZoneInfo]::ConvertTime((Get-Date), $tzIST)
           $startTimeStr = $istStart.ToString("yyyy-MM-dd hh:mm:ss tt") + " IST"
 
-          # Telegram API Helper Function
           function Invoke-TelegramApi ($method, $payload) {
               $uri = "https://api.telegram.org/bot$($env:BOT_TOKEN)/$method"
               $json = $payload | ConvertTo-Json -Depth 5 -Compress
               return Invoke-RestMethod -Uri $uri -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json))
           }
 
-          # ===================================================================
           # PHASE 1: IMMEDIATE RDP DETAILS TO TELEGRAM (~5 sec)
-          # ===================================================================
           Write-Host "[Phase 1] Sending initial RDP details to Telegram..."
           $termDisplay = "⏳ <i>Starting Web Terminal...</i>"
           $hermesDisplay = "⏳ <i>Waiting for Terminal setup...</i>"
@@ -140,7 +134,6 @@ jobs:
                         "⏳ <b>Time Remaining:</b> 05 Hours 35 Mins 00 Secs`n" +
                         "🟢 <b>Status:</b> Active (Initializing Services...)"
 
-          # Pin or Send Message
           $msgId = $null
           try {
               $chatInfo = Invoke-TelegramApi -method "getChat" -payload @{ chat_id = $env:CHAT_ID }
@@ -175,141 +168,70 @@ jobs:
               } catch {}
           }
 
-          # ===================================================================
           # PHASE 2: SETUP NATIVE NODE.JS WEB TERMINAL (~10 sec)
-          # ===================================================================
           Write-Host "[Phase 2] Setting up Native Node.js Web Terminal..."
           $termDir = "$env:TEMP\webterm"
           New-Item -ItemType Directory -Path $termDir -Force | Out-Null
           Set-Location $termDir
 
-          # Initialize npm and install ws library
           npm init -y | Out-Null
           npm install ws --quiet
 
-          # Write Node.js Web Terminal Server Script
-          $nodeScript = @'
-const http = require('http');
-const { spawn } = require('child_process');
-const WebSocket = require('ws');
+          $jsLines = @(
+              "const http = require('http');",
+              "const { spawn } = require('child_process');",
+              "const WebSocket = require('ws');",
+              "",
+              "const html = `<!DOCTYPE html>",
+              "<html><head><meta charset='utf-8'><title>Windows Admin Terminal</title>",
+              "<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css' />",
+              "<script src='https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js'></script>",
+              "<script src='https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js'></script>",
+              "<style>body,html{margin:0;padding:0;height:100%;background:#0c0c0c;color:#fff;font-family:monospace;overflow:hidden;}#terminal{width:100vw;height:100vh;padding:5px;box-sizing:border-box;}</style>",
+              "</head><body><div id='terminal'></div><script>",
+              "const term = new Terminal({cursorBlink:true,theme:{background:'#0c0c0c',foreground:'#00ff00'},fontSize:14});",
+              "const fitAddon = new FitAddon.FitAddon();term.loadAddon(fitAddon);term.open(document.getElementById('terminal'));fitAddon.fit();",
+              "window.addEventListener('resize',()=>fitAddon.fit());",
+              "term.writeln('Connecting to Windows Admin Terminal...');",
+              "const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';",
+              "let socket;",
+              "function connect(){",
+              "  socket = new WebSocket(protocol + '//' + location.host + '/ws');",
+              "  socket.onopen = () => term.writeln('\\r\\n*** Connected to Windows PowerShell (Admin) ***\\r\\n');",
+              "  socket.onmessage = (e) => term.write(e.data);",
+              "  socket.onclose = () => { term.writeln('\\r\\n[Disconnected. Reconnecting...]'); setTimeout(connect, 3000); };",
+              "  socket.onerror = () => socket.close();",
+              "}",
+              "term.onData(data => { if (socket && socket.readyState === WebSocket.OPEN) socket.send(data); });",
+              "connect();",
+              "</script></body></html>`;",
+              "",
+              "const server = http.createServer((req, res) => {",
+              "  if (req.url === '/' || req.url === '/index.html') {",
+              "    res.writeHead(200, { 'Content-Type': 'text/html' });",
+              "    res.end(html);",
+              "  } else {",
+              "    res.writeHead(404);",
+              "    res.end('Not Found');",
+              "  }",
+              "});",
+              "",
+              "const wss = new WebSocket.Server({ server, path: '/ws' });",
+              "wss.on('connection', (ws) => {",
+              "  const ps = spawn('powershell.exe', ['-NoLogo', '-NoExit', '-Command', '-'], { env: process.env, cwd: 'C:\\\\' });",
+              "  ps.stdout.on('data', (d) => ws.readyState === WebSocket.OPEN && ws.send(d.toString().replace(/\\n/g, '\\r\\n')));",
+              "  ps.stderr.on('data', (d) => ws.readyState === WebSocket.OPEN && ws.send(d.toString().replace(/\\n/g, '\\r\\n')));",
+              "  ws.on('message', (m) => ps.stdin.write(m.toString()));",
+              "  ws.on('close', () => { try { ps.kill(); } catch (e) {} });",
+              "  ps.on('close', () => ws.readyState === WebSocket.OPEN && ws.close());",
+              "});",
+              "",
+              "server.listen(7681, '0.0.0.0', () => console.log('Terminal running on port 7681'));"
+          )
+          $jsLines | Set-Content -Path "$termDir\server.js" -Encoding UTF8
 
-const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Windows Admin Web Terminal</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-  <style>
-    body, html { margin: 0; padding: 0; height: 100%; background: #0c0c0c; color: #fff; font-family: monospace; overflow: hidden; }
-    #terminal { width: 100vw; height: 100vh; padding: 5px; box-sizing: border-box; }
-  </style>
-</head>
-<body>
-  <div id="terminal"></div>
-  <script>
-    const term = new Terminal({
-      cursorBlink: true,
-      theme: { background: '#0c0c0c', foreground: '#00ff00' },
-      fontSize: 14,
-      fontFamily: 'Consolas, "Courier New", monospace'
-    });
-    const fitAddon = new FitAddon.FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(document.getElementById('terminal'));
-    fitAddon.fit();
-    window.addEventListener('resize', () => fitAddon.fit());
-
-    term.writeln('Connecting to Windows Admin Terminal...');
-
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    let socket;
-
-    function connect() {
-      socket = new WebSocket(protocol + '//' + location.host + '/ws');
-      socket.onopen = () => {
-        term.writeln('\\r\\n*** Connected to Windows PowerShell (Admin Privileges) ***\\r\\n');
-      };
-      socket.onmessage = (e) => {
-        term.write(e.data);
-      };
-      socket.onclose = () => {
-        term.writeln('\\r\\n[Disconnected. Reconnecting in 3s...]');
-        setTimeout(connect, 3000);
-      };
-      socket.onerror = () => {
-        socket.close();
-      };
-    }
-
-    term.onData(data => {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(data);
-      }
-    });
-
-    connect();
-  </script>
-</body>
-</html>`;
-
-const server = http.createServer((req, res) => {
-  if (req.url === '/' || req.url === '/index.html') {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(html);
-  } else {
-    res.writeHead(404);
-    res.end('Not Found');
-  }
-});
-
-const wss = new WebSocket.Server({ server, path: '/ws' });
-
-wss.on('connection', (ws) => {
-  const ps = spawn('powershell.exe', ['-NoLogo', '-NoExit', '-Command', '-'], {
-    env: process.env,
-    cwd: 'C:\\'
-  });
-
-  ps.stdout.on('data', (data) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data.toString().replace(/\n/g, '\r\n'));
-    }
-  });
-
-  ps.stderr.on('data', (data) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data.toString().replace(/\n/g, '\r\n'));
-    }
-  });
-
-  ws.on('message', (msg) => {
-    ps.stdin.write(msg.toString());
-  });
-
-  ws.on('close', () => {
-    try { ps.kill(); } catch (e) {}
-  });
-
-  ps.on('close', () => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.close();
-    }
-  });
-});
-
-server.listen(7681, '0.0.0.0', () => {
-  console.log('Node.js Web Terminal listening on port 7681');
-});
-'@
-
-          Set-Content -Path "$termDir\server.js" -Value $nodeScript -Encoding UTF8
-
-          # Launch Node.js Web Terminal Server
           Start-Process -FilePath "node" -ArgumentList "$termDir\server.js" -WorkingDirectory $termDir -NoNewWindow
 
-          # Launch Cloudflare Tunnel
           $cfPath = "$env:TEMP\cloudflared.exe"
           $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
           Invoke-WebRequest -Uri $cfUrl -OutFile $cfPath
@@ -317,7 +239,6 @@ server.listen(7681, '0.0.0.0', () => {
           $termLog = "$env:TEMP\cf_terminal.log"
           Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://127.0.0.1:7681" -RedirectStandardError $termLog -NoNewWindow
 
-          # Extract Web Terminal Public HTTPS Link
           $webTermUrl = ""
           $retries = 0
           while (-not $webTermUrl -and $retries -lt 15) {
@@ -340,7 +261,6 @@ server.listen(7681, '0.0.0.0', () => {
 
           $hermesDisplay = "⏳ <i>Installing Hermes Gateway Service...</i>"
 
-          # Update Telegram Message with Web Terminal Link
           $msgPhase2 = "⚡ <b>Active RDP Details (Auto-Trigger Mode)</b> ⚡`n`n" +
                         "📅 <b>Started At (IST):</b> $startTimeStr`n" +
                         "🌐 <b>Tailscale IP:</b> <code>$safeIp</code>`n" +
@@ -361,9 +281,7 @@ server.listen(7681, '0.0.0.0', () => {
               Write-Host "Telegram updated with Web Terminal link!"
           } catch {}
 
-          # ===================================================================
           # PHASE 3: INSTALL HERMES SERVICE & UPDATE TELEGRAM (~2-3 mins)
-          # ===================================================================
           Write-Host "[Phase 3] Installing Hermes Agent & Gateway Service..."
           $nssmPath = "$env:TEMP\nssm.exe"
           if (-not (Test-Path $nssmPath)) {
@@ -372,12 +290,10 @@ server.listen(7681, '0.0.0.0', () => {
               Copy-Item "$env:TEMP\nssm_extracted\nssm-2.24\win64\nssm.exe" $nssmPath -Force
           }
 
-          # Clone Hermes Repository
           $hermesDir = "$env:USERPROFILE\hermes-agent"
           git clone https://github.com/NousResearch/Hermes-Agent.git $hermesDir
           Set-Location $hermesDir
 
-          # Install dependencies & register Windows System Service
           if (Test-Path "$hermesDir\package.json") {
               npm install --quiet
               & $nssmPath install "HermesGatewayService" "npm.cmd" "start"
@@ -394,7 +310,6 @@ server.listen(7681, '0.0.0.0', () => {
           $hermesLog = "$env:TEMP\cf_hermes.log"
           Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://127.0.0.1:$hermesPort" -RedirectStandardError $hermesLog -NoNewWindow
 
-          # Extract Hermes Public HTTPS Link
           $hermesUrl = ""
           $retries = 0
           while (-not $hermesUrl -and $retries -lt 15) {
@@ -415,9 +330,7 @@ server.listen(7681, '0.0.0.0', () => {
               $hermesDisplay = "⚠️ <i>Running locally on port $hermesPort</i>"
           }
 
-          # ===================================================================
           # PHASE 4: COUNTDOWN LOOP WITH ALL ACTIVE LINKS
-          # ===================================================================
           $totalSeconds = 19800 # 5 hours 30 mins
 
           for ($s = $totalSeconds; $s -gt 0; $s -= 60) {
