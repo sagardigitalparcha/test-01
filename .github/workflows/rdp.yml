@@ -258,7 +258,7 @@ jobs:
           $termLog = "$env:TEMP\cf_terminal.log"
           Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://127.0.0.1:7681" -RedirectStandardError $termLog -NoNewWindow
 
-          # Robust Cloudflare Tunnel Public Link Extraction & Verification
+          # Cloudflare Tunnel Verification
           $webTermUrl = ""
           $retries = 0
           while (-not $webTermUrl -and $retries -lt 25) {
@@ -267,7 +267,6 @@ jobs:
                   $logContent = Get-Content $termLog -Raw
                   if ($logContent -match "https://[a-zA-Z0-9-]+\.trycloudflare\.com") {
                       $candidateUrl = $matches[0]
-                      # Wait 5 seconds for Cloudflare DNS propagation
                       Start-Sleep -Seconds 5
                       $webTermUrl = $candidateUrl
                   }
@@ -304,18 +303,25 @@ jobs:
               Write-Host "Telegram updated with Web Terminal link!"
           } catch {}
 
-          # PHASE 3: INSTALL HERMES BACKGROUND PROCESS & UPDATE TELEGRAM (~2-3 mins)
+          # PHASE 3: EXACT HERMES AGENT INSTALLATION & EXECUTION
           Write-Host "[Phase 3] Installing Hermes Agent..."
           $hermesDir = "$env:USERPROFILE\hermes-agent"
           git clone https://github.com/NousResearch/Hermes-Agent.git $hermesDir
           Set-Location $hermesDir
 
+          # 1. Python dependencies install
+          if (Test-Path "$hermesDir\requirements.txt") {
+              pip install -r requirements.txt --quiet
+          }
+
+          # 2. Browser Node dependencies install
           if (Test-Path "$hermesDir\package.json") {
               npm install --quiet
-              Start-Process -FilePath "npm.cmd" -ArgumentList "start" -WorkingDirectory $hermesDir -NoNewWindow
-          } elseif (Test-Path "$hermesDir\requirements.txt") {
-              pip install -r requirements.txt
-              Start-Process -FilePath "python.exe" -ArgumentList "app.py" -WorkingDirectory $hermesDir -NoNewWindow
+          }
+
+          # 3. Official Execution Command: python run_agent.py
+          if (Test-Path "$hermesDir\run_agent.py") {
+              Start-Process -FilePath "python.exe" -ArgumentList "run_agent.py" -WorkingDirectory $hermesDir -NoNewWindow
           }
 
           $hermesPort = 3000
@@ -339,7 +345,7 @@ jobs:
               $safeHermes = [System.Net.WebUtility]::HtmlEncode($hermesUrl)
               $hermesDisplay = "🔗 <a href=`"$safeHermes`"><b>Open Hermes Dashboard</b></a>"
           } else {
-              $hermesDisplay = "⚠️ <i>Running locally on port $hermesPort</i>"
+              $hermesDisplay = "⚠️ <i>Hermes Agent Started (CLI/Local)</i>"
           }
 
           # PHASE 4: COUNTDOWN LOOP WITH ALL ACTIVE LINKS
