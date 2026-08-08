@@ -168,21 +168,18 @@ jobs:
               } catch {}
           }
 
-          # PHASE 2: SETUP WEBTERM FROM GITHUB (abhishekkrthakur/webterm)
+          # PHASE 2: SETUP WEBTERM (abhishekkrthakur/webterm)
           Write-Host "[Phase 2] Setting up abhishekkrthakur/webterm..."
           $termDir = "$env:TEMP\webterm"
+          if (Test-Path $termDir) { Remove-Item -Recurse -Force $termDir }
           git clone https://github.com/abhishekkrthakur/webterm.git $termDir
           Set-Location $termDir
 
-          if (Test-Path "$termDir\package.json") {
-              npm install --quiet
-              Start-Process -FilePath "npm" -ArgumentList "start" -WorkingDirectory $termDir -NoNewWindow
-          } elseif (Test-Path "$termDir\requirements.txt") {
-              pip install -r requirements.txt --quiet
-              Start-Process -FilePath "python" -ArgumentList "app.py" -WorkingDirectory $termDir -NoNewWindow
-          } else {
-              Start-Process -FilePath "go" -ArgumentList "run", "." -WorkingDirectory $termDir -NoNewWindow
-          }
+          # Install webterm using editable mode as per official docs
+          pip install -e . --quiet
+          
+          # Start webterm server on port 7681
+          Start-Process -FilePath "webterm" -ArgumentList "--host", "127.0.0.1", "--port", "7681" -WorkingDirectory $termDir -NoNewWindow
           Start-Sleep -Seconds 5
 
           # Download and Start Cloudflared Tunnel for Web Terminal
@@ -243,6 +240,7 @@ jobs:
           # PHASE 3: HERMES AGENT INSTALLATION & EXECUTION
           Write-Host "[Phase 3] Installing Hermes Agent..."
           $hermesDir = "$env:USERPROFILE\hermes-agent"
+          if (Test-Path $hermesDir) { Remove-Item -Recurse -Force $hermesDir }
           git clone https://github.com/NousResearch/Hermes-Agent.git $hermesDir
           Set-Location $hermesDir
 
